@@ -169,11 +169,13 @@ func (o *SidecarOptions) Run(streams genericclioptions.IOStreams, cmd *cobra.Com
 	namespacedKubeInformers := informers.NewSharedInformerFactoryWithOptions(o.kubeClient, 12*time.Hour, informers.WithNamespace(o.Namespace))
 
 	singleServiceInformer := singleServiceKubeInformers.Core().V1().Services()
+	singlePodInformer := singleServiceKubeInformers.Core().V1().Pods()
 
 	prober := sidecar.NewProber(
 		o.Namespace,
 		o.ServiceName,
 		singleServiceInformer.Lister(),
+		singlePodInformer.Lister(),
 	)
 
 	sc, err := sidecarcontroller.NewController(
@@ -391,6 +393,7 @@ func (o *SidecarOptions) Run(streams genericclioptions.IOStreams, cmd *cobra.Com
 
 		http.HandleFunc(naming.LivenessProbePath, prober.Healthz)
 		http.HandleFunc(naming.ReadinessProbePath, prober.Readyz)
+		http.HandleFunc(naming.MemberMetadataPath, prober.Readyz)
 
 		err := server.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {

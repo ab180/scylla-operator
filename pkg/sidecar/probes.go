@@ -2,7 +2,9 @@ package sidecar
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"k8s.io/apimachinery/pkg/labels"
 	"net/http"
 	"time"
 
@@ -20,18 +22,16 @@ type Prober struct {
 	namespace     string
 	serviceName   string
 	serviceLister corev1.ServiceLister
+	podLister     corev1.PodLister
 	timeout       time.Duration
 }
 
-func NewProber(
-	namespace string,
-	serviceName string,
-	serviceLister corev1.ServiceLister,
-) *Prober {
+func NewProber(namespace string, serviceName string, serviceLister corev1.ServiceLister, podLister corev1.PodLister) *Prober {
 	return &Prober{
 		namespace:     namespace,
 		serviceName:   serviceName,
 		serviceLister: serviceLister,
+		podLister:     podLister,
 		timeout:       60 * time.Second,
 	}
 }
@@ -157,4 +157,44 @@ func (p *Prober) Healthz(w http.ResponseWriter, req *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func (p *Prober) MemberMetadata(w http.ResponseWriter, req *http.Request) {
+	_, ctxCancel := context.WithTimeout(req.Context(), p.timeout)
+	defer ctxCancel()
+	l := naming.ScyllaLabels()
+	l[naming.ScyllaServiceTypeLabel] = string(naming.ScyllaServiceTypeMember)
+	svcs, err := p.serviceLister.Services(p.namespace).List(labels.SelectorFromSet(l))
+
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	metadata := Metadata{
+		Members: make([]*MemberMetadata, 0, len(svcs)),
+	}
+	for _, svc := range svcs {
+		podSelector := svc.Spec.Selector
+		pods, err := p.podLister.Pods(p.namespace).List(labels.SelectorFromSet(podSelector))
+		if err != nil {
+			continue
+		}
+		metadata.Members = append(metadata.Members, NewMemberMetadata(svc, pods))
+	}
+
+	var members []string
+	for _, svc := range svcs {
+		members = append(members, svc.Name)
+	}
+
+	body, err := json.Marshal(metadata)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(body)
 }

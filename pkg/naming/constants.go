@@ -102,6 +102,7 @@ const (
 
 	ReadinessProbePath = "/readyz"
 	LivenessProbePath  = "/healthz"
+	MemberMetadataPath = "/members"
 	ProbePort          = 8080
 	ScyllaAPIPort      = 10000
 
